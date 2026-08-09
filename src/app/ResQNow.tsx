@@ -165,7 +165,7 @@ export function ResQNowApp() {
               setTab("home");
               go("app");
             }}
-            helpersNotified={incident?.helpers_notified ?? 0}
+            helpersNotified={helperRequests.length}
             contactsNotified={contacts.filter((c) => c.is_selected).length}
           />
         );
@@ -232,9 +232,9 @@ export function ResQNowApp() {
           default:
             return (
               <VictimHome
-                onSos={() => void startIncident({ source: "manual_sos" })}
-                onSimulate={() => void startIncident({ source: "sensor" })}
-                onHelperMode={() => go("community")}
+                onSos={() => void startIncident("manual_sos")}
+                onSimulate={() => void startIncident("sensor_simulation")}
+                onHelperMode={() => setTab("community")}
                 onNotifications={() => go("notifications")}
               />
             );
