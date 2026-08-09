@@ -471,10 +471,10 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       const result = await runInference(samples);
 
       const { data, error } = await supabase.rpc("start_incident", {
-        _latitude: lat,
-        _longitude: lng,
-        _address: profile?.location ?? null,
-        _speed: samples[0]?.speedKmh ?? null,
+        _latitude: lat ?? undefined,
+        _longitude: lng ?? undefined,
+        _address: profile?.location ?? undefined,
+        _speed: samples[0]?.speedKmh ?? undefined,
         _severity: result.severity,
         _probability: result.accidentProbability,
         _source: source,
@@ -496,7 +496,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.rpc("advance_incident", {
         _incident_id: incident.id,
         _next_stage: stage,
-        _note: note ?? null,
+        _note: note ?? undefined,
         _metadata: {},
       });
       if (error) throw new Error(message(error, "Could not update the emergency."));
@@ -595,7 +595,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.rpc("advance_incident", {
         _incident_id: helperIncident.id,
         _next_stage: stage,
-        _note: note ?? null,
+        _note: note ?? undefined,
         _metadata: {},
       });
       if (error) throw new Error(message(error, "Could not update the rescue."));
