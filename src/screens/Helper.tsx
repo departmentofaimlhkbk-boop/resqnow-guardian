@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   AlertTriangle,
@@ -14,10 +14,12 @@ import {
   X,
   Check,
   BedDouble,
+  Loader2,
+  Inbox,
 } from "lucide-react";
 import { Avatar, Button, Card, Checklist, Label, Pill, Screen } from "@/components/kit";
 import { MapCanvas } from "@/components/MapCanvas";
-import { USER } from "@/lib/mock";
+import { useResQ, type Incident } from "@/hooks/useResQ";
 
 export type HelperStage =
   | "request"
@@ -30,15 +32,84 @@ export type HelperStage =
   | "handover"
   | "completed";
 
+function severityLabel(inc: Incident | null) {
+  return (inc?.severity ?? "high").toUpperCase();
+}
+
+function locationLabel(inc: Incident | null) {
+  if (inc?.address) return inc.address;
+  if (inc?.latitude != null && inc?.longitude != null) {
+    return `${inc.latitude.toFixed(4)}, ${inc.longitude.toFixed(4)}`;
+  }
+  return "Location shared on arrival";
+}
+
+/** The incident this device is currently acting on, from either side. */
+function useLiveIncident() {
+  const { helperIncident, incident } = useResQ();
+  return helperIncident ?? incident;
+}
+
 /* ---------- 10. New emergency request ---------- */
 
 export function HelperRequest({ onAccept, onDecline }: { onAccept: () => void; onDecline: () => void }) {
-  const [sec, setSec] = useState(25);
+  const { helperRequests, acceptRequest, declineRequest } = useResQ();
+  const req = helperRequests[0] ?? null;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sec, setSec] = useState(0);
+
   useEffect(() => {
-    if (sec <= 0) return;
-    const t = setTimeout(() => setSec((s) => s - 1), 1000);
-    return () => clearTimeout(t);
-  }, [sec]);
+    if (!req) return;
+    const tick = () => setSec(Math.max(0, Math.round((new Date(req.expires_at).getTime() - Date.now()) / 1000)));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [req]);
+
+  if (!req) {
+    return (
+      <Screen className="flex h-full flex-col px-5 pb-6 pt-14">
+        <Pill tone="green">
+          <Check className="size-3" /> HELPER MODE ON
+        </Pill>
+        <div className="grid flex-1 place-items-center text-center">
+          <div>
+            <span className="mx-auto grid size-16 place-items-center rounded-[24px] border border-border bg-white/[0.04]">
+              <Inbox className="size-7 text-muted-foreground" />
+            </span>
+            <h1 className="mt-5 text-[24px] font-bold tracking-tight">No emergency requests</h1>
+            <p className="mt-2 max-w-[16rem] text-[14px] text-muted-foreground">
+              You are on duty. The moment someone nearby raises an alert, it appears here instantly.
+            </p>
+          </div>
+        </div>
+        <Button variant="outline" onClick={onDecline}>
+          Back to home
+        </Button>
+      </Screen>
+    );
+  }
+
+  const inc = req.incident;
+
+  const respond = async (accept: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (accept) {
+        await acceptRequest(req.id);
+        onAccept();
+      } else {
+        await declineRequest(req.id);
+        onDecline();
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not respond to this request.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-14">
@@ -54,11 +125,13 @@ export function HelperRequest({ onAccept, onDecline }: { onAccept: () => void; o
             <AlertTriangle className="size-3" /> NEW EMERGENCY REQUEST
           </Pill>
           <Pill tone="orange">
-            <Clock className="size-3" /> Expires in {sec}s
+            <Clock className="size-3" /> {sec > 0 ? `Expires in ${sec}s` : "Expired"}
           </Pill>
         </div>
 
-        <h1 className="mt-5 text-[26px] font-bold leading-tight tracking-tight">High Severity Accident</h1>
+        <h1 className="mt-5 text-[26px] font-bold leading-tight tracking-tight">
+          {severityLabel(inc).charAt(0) + severityLabel(inc).slice(1).toLowerCase()} Severity Accident
+        </h1>
         <p className="mt-1.5 text-[14px] text-muted-foreground">Someone near you needs immediate help.</p>
 
         <Card className="mt-4 p-0">
@@ -73,11 +146,13 @@ export function HelperRequest({ onAccept, onDecline }: { onAccept: () => void; o
           <div className="grid grid-cols-2 divide-x divide-border border-t border-border">
             <div className="p-4">
               <Label>Distance</Label>
-              <p className="mt-1 text-[20px] font-bold">2.4 km</p>
+              <p className="mt-1 text-[20px] font-bold">
+                {req.distance_km != null ? `${req.distance_km} km` : "Nearby"}
+              </p>
             </div>
             <div className="p-4">
               <Label>Severity</Label>
-              <p className="mt-1 text-[20px] font-bold text-primary">HIGH</p>
+              <p className="mt-1 text-[20px] font-bold text-primary">{severityLabel(inc)}</p>
             </div>
           </div>
         </Card>
@@ -89,18 +164,20 @@ export function HelperRequest({ onAccept, onDecline }: { onAccept: () => void; o
             </span>
             <div className="min-w-0">
               <Label>Location</Label>
-              <p className="truncate text-[15px] font-semibold">MG Road, Bangalore</p>
+              <p className="truncate text-[15px] font-semibold">{locationLabel(inc)}</p>
             </div>
           </div>
         </Card>
+
+        {error && <p className="mt-3 text-[13px] text-primary">{error}</p>}
       </div>
 
       <div className="relative mt-auto grid grid-cols-2 gap-3 pt-5">
-        <Button variant="outline" onClick={onDecline}>
+        <Button variant="outline" onClick={() => void respond(false)} disabled={busy}>
           <X className="size-4.5" /> Decline
         </Button>
-        <Button variant="emergency" onClick={onAccept}>
-          <Check className="size-4.5" /> Accept
+        <Button variant="emergency" onClick={() => void respond(true)} disabled={busy}>
+          {busy ? <Loader2 className="size-4.5 animate-spin" /> : <Check className="size-4.5" />} Accept
         </Button>
       </div>
     </Screen>
@@ -110,6 +187,7 @@ export function HelperRequest({ onAccept, onDecline }: { onAccept: () => void; o
 /* ---------- 11. Accepted ---------- */
 
 export function HelperAccepted({ onStart }: { onStart: () => void }) {
+  const inc = useLiveIncident();
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-16">
       <div className="text-center">
@@ -121,16 +199,16 @@ export function HelperAccepted({ onStart }: { onStart: () => void }) {
         >
           <CheckCircle2 className="size-10 text-success" />
         </motion.span>
-        <h1 className="mt-5 text-[28px] font-bold tracking-tight">You Accepted</h1>
+        <h1 className="mt-5 text-[28px] font-bold tracking-tight">Helper Assigned</h1>
         <p className="mt-1.5 text-[15px] text-muted-foreground">Navigate to Victim</p>
       </div>
 
       <Card className="mt-6">
         <div className="flex items-center gap-3">
-          <Avatar name="Rohit Sharma" color="#1677FF" />
+          <Avatar name="Victim" color="#1677FF" />
           <div className="min-w-0 flex-1">
-            <p className="text-[15px] font-semibold">Rohit will guide you</p>
-            <p className="text-[12.5px] text-muted-foreground">ResQNow response coordinator</p>
+            <p className="text-[15px] font-semibold">{locationLabel(inc)}</p>
+            <p className="text-[12.5px] text-muted-foreground">Severity {severityLabel(inc)}</p>
           </div>
           <Pill tone="blue">LIVE</Pill>
         </div>
@@ -140,23 +218,12 @@ export function HelperAccepted({ onStart }: { onStart: () => void }) {
         <MapCanvas
           className="h-64 rounded-[20px]"
           markers={[
-            { id: "me", kind: "helper", x: 24, y: 74, pulse: true, label: "You" },
-            { id: "v", kind: "victim", x: 66, y: 36, pulse: true, label: "Arjun" },
+            { id: "me", kind: "helper", x: 24, y: 74, pulse: true, label: "Helper" },
+            { id: "v", kind: "victim", x: 66, y: 36, pulse: true, label: "Victim" },
           ]}
           route={{ from: [24, 74], to: [66, 36] }}
         />
       </Card>
-
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <Card>
-          <Label>Distance</Label>
-          <p className="mt-1 text-[22px] font-bold">2.4 km</p>
-        </Card>
-        <Card>
-          <Label>ETA</Label>
-          <p className="mt-1 text-[22px] font-bold text-blue-bright">7 min</p>
-        </Card>
-      </div>
 
       <Button variant="primary" className="mt-auto" onClick={onStart}>
         <Navigation className="size-4.5" /> Start Navigation
@@ -174,11 +241,27 @@ export function LiveNavigation({
   target: "victim" | "hospital";
   onArrive: () => void;
 }) {
+  const inc = useLiveIncident();
+  const { hospitals, pushHelperLocation } = useResQ();
+  const hospital = hospitals.find((h) => h.id === inc?.hospital_id) ?? hospitals[0] ?? null;
   const [t, setT] = useState(0);
+
   useEffect(() => {
     const id = setInterval(() => setT((v) => Math.min(v + 1, 10)), 1200);
     return () => clearInterval(id);
   }, []);
+
+  // Stream the helper's real position while navigating.
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) return;
+    const watch = navigator.geolocation.watchPosition(
+      (pos) => void pushHelperLocation(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy),
+      () => undefined,
+      { enableHighAccuracy: true, maximumAge: 5000 },
+    );
+    return () => navigator.geolocation.clearWatch(watch);
+  }, [pushHelperLocation]);
+
   const p = t / 10;
   const from: [number, number] = target === "victim" ? [24, 74] : [66, 36];
   const to: [number, number] = target === "victim" ? [66, 36] : [82, 78];
@@ -194,8 +277,8 @@ export function LiveNavigation({
         markers={[
           { id: "me", kind: "helper", x, y, pulse: true, label: "You" },
           target === "victim"
-            ? { id: "v", kind: "victim", x: 66, y: 36, pulse: true, label: "Arjun" }
-            : { id: "h", kind: "hospital", x: 82, y: 78, pulse: true, label: "City Care" },
+            ? { id: "v", kind: "victim", x: 66, y: 36, pulse: true, label: "Victim" }
+            : { id: "h", kind: "hospital", x: 82, y: 78, pulse: true, label: hospital?.name ?? "Hospital" },
         ]}
         route={{ from, to }}
       />
@@ -208,7 +291,7 @@ export function LiveNavigation({
           <div className="min-w-0 flex-1">
             <Label tone="blue">{target === "victim" ? "Navigating to Victim" : "Navigating to Hospital"}</Label>
             <p className="mt-0.5 truncate text-[15px] font-semibold">
-              {target === "victim" ? "MG Road, Bangalore" : "City Care Hospital"}
+              {target === "victim" ? locationLabel(inc) : (hospital?.name ?? "Nearest hospital")}
             </p>
           </div>
         </Card>
@@ -227,13 +310,13 @@ export function LiveNavigation({
             </div>
           </div>
           <div className="mt-3 grid grid-cols-3 gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled={!hospital?.phone}>
               <Phone className="size-4" /> Call
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled>
               <MessageSquare className="size-4" /> Chat
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" disabled>
               <MapPin className="size-4" /> Share
             </Button>
           </div>
@@ -249,11 +332,12 @@ export function LiveNavigation({
 /* ---------- 13. Victim reached ---------- */
 
 export function VictimReached({ onHospital }: { onHospital: () => void }) {
+  const inc = useLiveIncident();
   return (
     <div className="relative h-full">
       <MapCanvas
         className="absolute inset-0 size-full"
-        markers={[{ id: "v", kind: "hospital", x: 52, y: 42, pulse: true, label: "Arjun — Safe" }]}
+        markers={[{ id: "v", kind: "hospital", x: 52, y: 42, pulse: true, label: "Victim reached" }]}
       />
       <div className="absolute inset-x-4 bottom-6 space-y-3">
         <motion.div initial={{ y: 30, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
@@ -264,11 +348,11 @@ export function VictimReached({ onHospital }: { onHospital: () => void }) {
               </span>
               <div className="min-w-0">
                 <p className="text-[17px] font-bold">Victim Location Reached</p>
-                <p className="text-[12.5px] text-success">Victim is Safe</p>
+                <p className="truncate text-[12.5px] text-success">{locationLabel(inc)}</p>
               </div>
             </div>
             <div className="mt-4 grid grid-cols-2 gap-2">
-              <Button variant="outline" size="md">
+              <Button variant="outline" size="md" disabled>
                 <MapPin className="size-4" /> Victim Location
               </Button>
               <Button variant="success" size="md" onClick={onHospital}>
@@ -285,40 +369,70 @@ export function VictimReached({ onHospital }: { onHospital: () => void }) {
 /* ---------- 14. Choose hospital ---------- */
 
 export function HospitalRoute({ onStart }: { onStart: () => void }) {
+  const { hospitals, setHospital } = useResQ();
+  const inc = useLiveIncident();
+  const [selected, setSelected] = useState<string | null>(inc?.hospital_id ?? hospitals[0]?.id ?? null);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!selected && hospitals[0]) setSelected(hospitals[0].id);
+  }, [hospitals, selected]);
+
+  const start = async () => {
+    if (!selected) return;
+    setBusy(true);
+    try {
+      await setHospital(selected);
+      onStart();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-14">
       <h1 className="text-[26px] font-bold leading-tight tracking-tight">Navigate to Nearby Hospital</h1>
-      <p className="mt-1.5 text-[14px] text-muted-foreground">Nearest trauma-ready facility selected for you.</p>
+      <p className="mt-1.5 text-[14px] text-muted-foreground">Choose the facility best prepared for this patient.</p>
 
-      <Card className="mt-4 border-success/30">
-        <div className="flex items-center gap-3">
-          <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-success/40 bg-success/15">
-            <Building2 className="size-5 text-success" />
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[16px] font-bold">City Care Hospital</p>
-            <p className="text-[12.5px] text-muted-foreground">Trauma centre · 6 beds free</p>
-          </div>
-          <div className="text-right">
-            <p className="text-[18px] font-bold">2.7 km</p>
-            <p className="text-[11px] text-muted-foreground">8 min</p>
-          </div>
-        </div>
-      </Card>
+      <div className="no-scrollbar mt-4 max-h-60 space-y-2.5 overflow-y-auto">
+        {hospitals.length === 0 && (
+          <Card>
+            <p className="text-[13.5px] text-muted-foreground">No hospitals are registered in this area yet.</p>
+          </Card>
+        )}
+        {hospitals.map((h) => (
+          <button key={h.id} onClick={() => setSelected(h.id)} className="w-full text-left">
+            <Card className={selected === h.id ? "border-success/45 bg-success/[0.07]" : ""}>
+              <div className="flex items-center gap-3">
+                <span className="grid size-11 shrink-0 place-items-center rounded-2xl border border-success/40 bg-success/15">
+                  <Building2 className="size-5 text-success" />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[16px] font-bold">{h.name}</p>
+                  <p className="truncate text-[12.5px] text-muted-foreground">
+                    {h.trauma_center ? "Trauma centre" : "General hospital"} · {h.beds_available} beds free
+                  </p>
+                </div>
+                {selected === h.id && <Check className="size-5 shrink-0 text-success" />}
+              </div>
+            </Card>
+          </button>
+        ))}
+      </div>
 
       <Card className="mt-3 p-0">
         <MapCanvas
-          className="h-72 rounded-[20px]"
+          className="h-56 rounded-[20px]"
           markers={[
             { id: "v", kind: "victim", x: 30, y: 34, label: "Pickup" },
-            { id: "h", kind: "hospital", x: 78, y: 76, pulse: true, label: "City Care" },
+            { id: "h", kind: "hospital", x: 78, y: 76, pulse: true, label: "Hospital" },
           ]}
           route={{ from: [30, 34], to: [78, 76] }}
         />
       </Card>
 
-      <Button variant="primary" className="mt-auto" onClick={onStart}>
-        <Navigation className="size-4.5" /> Start Navigation
+      <Button variant="primary" className="mt-auto" onClick={start} disabled={!selected || busy}>
+        {busy ? <Loader2 className="size-4.5 animate-spin" /> : <Navigation className="size-4.5" />} Start Navigation
       </Button>
     </Screen>
   );
@@ -327,6 +441,9 @@ export function HospitalRoute({ onStart }: { onStart: () => void }) {
 /* ---------- 16. Hospital notification ---------- */
 
 export function HospitalNotify({ onNext }: { onNext: () => void }) {
+  const { hospitals, medical, profile } = useResQ();
+  const inc = useLiveIncident();
+  const hospital = hospitals.find((h) => h.id === inc?.hospital_id) ?? hospitals[0] ?? null;
   const [step, setStep] = useState(0);
   useEffect(() => {
     if (step >= 3) return;
@@ -334,6 +451,14 @@ export function HospitalNotify({ onNext }: { onNext: () => void }) {
     return () => clearTimeout(t);
   }, [step]);
   const ack = step >= 3;
+
+  const rows: [string, string][] = [
+    ["Hospital", hospital?.name ?? "Nearest hospital"],
+    ["Name", profile?.full_name ?? "Victim"],
+    ["Severity", severityLabel(inc)],
+    ["Blood group", medical?.blood_group ?? "Not provided"],
+    ["Allergies", medical?.allergies ?? "None recorded"],
+  ];
 
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-14">
@@ -350,8 +475,8 @@ export function HospitalNotify({ onNext }: { onNext: () => void }) {
       <Card className="mt-5">
         <div className="flex items-center justify-between">
           <div>
-            <Label>Estimated Arrival</Label>
-            <p className="mt-1 text-[30px] font-bold leading-none text-warning">7 min</p>
+            <Label>Beds available</Label>
+            <p className="mt-1 text-[30px] font-bold leading-none text-warning">{hospital?.beds_available ?? 0}</p>
           </div>
           <span className="grid size-14 place-items-center rounded-2xl border border-warning/35 bg-warning/12">
             <Clock className="size-6 text-warning" />
@@ -362,21 +487,15 @@ export function HospitalNotify({ onNext }: { onNext: () => void }) {
       <Card className="mt-3">
         <Label tone="green">Patient Incoming</Label>
         <div className="mt-3 space-y-2.5 text-[14px]">
-          {[
-            ["Hospital", "City Care Hospital"],
-            ["Name", USER.name],
-            ["Severity", "High"],
-            ["Blood group", USER.blood],
-            ["ETA", "7 min"],
-          ].map(([k, v]) => (
+          {rows.map(([k, v]) => (
             <div key={k} className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">{k}</span>
-              <span className="font-semibold">{v}</span>
+              <span className="truncate font-semibold">{v}</span>
             </div>
           ))}
           <div className="flex items-center justify-between gap-3 border-t border-border pt-2.5">
             <span className="text-muted-foreground">Status</span>
-            <span className="font-semibold text-success">Notification Sent ✓</span>
+            <span className="font-semibold text-success">{ack ? "Notification Sent ✓" : "Sending…"}</span>
           </div>
         </div>
       </Card>
@@ -399,6 +518,7 @@ export function HospitalNotify({ onNext }: { onNext: () => void }) {
 /* ---------- 17. Police notification ---------- */
 
 export function PoliceNotify({ onNext }: { onNext: () => void }) {
+  const inc = useLiveIncident();
   const [step, setStep] = useState(0);
   useEffect(() => {
     if (step >= 3) return;
@@ -406,6 +526,14 @@ export function PoliceNotify({ onNext }: { onNext: () => void }) {
     return () => clearTimeout(t);
   }, [step]);
   const ack = step >= 3;
+
+  const rows: [string, string][] = [
+    ["Location", locationLabel(inc)],
+    ["Severity", severityLabel(inc)],
+    ["Reported", inc ? new Date(inc.created_at).toLocaleTimeString() : "—"],
+    ["Detection", inc?.detection_source === "manual_sos" ? "Manual SOS" : "Sensor detection"],
+    ["Confidence", inc ? `${Math.round(inc.accident_probability * 100)}%` : "—"],
+  ];
 
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-14">
@@ -425,8 +553,8 @@ export function PoliceNotify({ onNext }: { onNext: () => void }) {
             <Shield className="size-5 text-warning" />
           </span>
           <div className="min-w-0">
-            <p className="truncate text-[16px] font-bold">MG Road Police Station</p>
-            <p className="text-[12.5px] text-muted-foreground">1.2 km from incident</p>
+            <p className="truncate text-[16px] font-bold">Nearest police station</p>
+            <p className="truncate text-[12.5px] text-muted-foreground">{locationLabel(inc)}</p>
           </div>
         </div>
       </Card>
@@ -434,13 +562,7 @@ export function PoliceNotify({ onNext }: { onNext: () => void }) {
       <Card className="mt-3">
         <Label tone="orange">Accident Report Shared</Label>
         <div className="mt-3 space-y-2.5 text-[14px]">
-          {[
-            ["Location", "MG Road, Bangalore"],
-            ["Severity", "High"],
-            ["Time", "21:42 IST"],
-            ["Vehicle", "Two-wheeler impact"],
-            ["Helper", "Rohit Sharma"],
-          ].map(([k, v]) => (
+          {rows.map(([k, v]) => (
             <div key={k} className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">{k}</span>
               <span className="truncate font-semibold">{v}</span>
@@ -463,18 +585,23 @@ export function PoliceNotify({ onNext }: { onNext: () => void }) {
 /* ---------- 18. Handover ---------- */
 
 export function Handover({ onComplete }: { onComplete: () => void }) {
+  const { hospitals } = useResQ();
+  const inc = useLiveIncident();
+  const hospital = hospitals.find((h) => h.id === inc?.hospital_id) ?? hospitals[0] ?? null;
+  const [busy, setBusy] = useState(false);
+
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-14">
       <Pill tone="green">
         <Building2 className="size-3" /> AT HOSPITAL
       </Pill>
       <h1 className="mt-4 text-[27px] font-bold tracking-tight">At Hospital</h1>
-      <p className="mt-1.5 text-[14px] text-muted-foreground">City Care Hospital · Emergency Wing</p>
+      <p className="mt-1.5 text-[14px] text-muted-foreground">{hospital?.name ?? "Hospital"} · Emergency Wing</p>
 
       <Card className="mt-4 p-0">
         <MapCanvas
           className="h-56 rounded-[20px]"
-          markers={[{ id: "h", kind: "hospital", x: 52, y: 48, pulse: true, label: "City Care Hospital" }]}
+          markers={[{ id: "h", kind: "hospital", x: 52, y: 48, pulse: true, label: hospital?.name ?? "Hospital" }]}
         />
       </Card>
 
@@ -490,8 +617,16 @@ export function Handover({ onComplete }: { onComplete: () => void }) {
         </div>
       </Card>
 
-      <Button variant="success" className="mt-auto" onClick={onComplete}>
-        Mark as Completed
+      <Button
+        variant="success"
+        className="mt-auto"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          onComplete();
+        }}
+      >
+        {busy && <Loader2 className="size-4.5 animate-spin" />} Mark as Completed
       </Button>
     </Screen>
   );
@@ -499,7 +634,25 @@ export function Handover({ onComplete }: { onComplete: () => void }) {
 
 /* ---------- 19. Completed ---------- */
 
-export function Completed({ onHome }: { onHome: () => void }) {
+export function Completed({ onHome, incident }: { onHome: () => void; incident: Incident | null }) {
+  const { hospitals } = useResQ();
+  const hospital = hospitals.find((h) => h.id === incident?.hospital_id) ?? null;
+
+  const responseTime = useMemo(() => {
+    if (!incident?.completed_at) return "—";
+    const ms = new Date(incident.completed_at).getTime() - new Date(incident.created_at).getTime();
+    const min = Math.floor(ms / 60000);
+    const sec = Math.round((ms % 60000) / 1000);
+    return `${min} min ${sec} s`;
+  }, [incident]);
+
+  const rows: [string, string][] = [
+    ["Response time", responseTime],
+    ["Severity", severityLabel(incident)],
+    ["Hospital", hospital?.name ?? "Not recorded"],
+    ["Incident ID", incident ? incident.id.slice(0, 8).toUpperCase() : "—"],
+  ];
+
   return (
     <Screen className="flex h-full flex-col px-5 pb-6 pt-16">
       <div className="text-center">
@@ -517,24 +670,16 @@ export function Completed({ onHome }: { onHome: () => void }) {
 
       <Card className="mt-7">
         <div className="space-y-3 text-[14px]">
-          {[
-            ["Response time", "11 min 24 s"],
-            ["Helper", "Rohit Sharma"],
-            ["Hospital", "City Care Hospital"],
-            ["Incident ID", "RQ-2291"],
-          ].map(([k, v]) => (
+          {rows.map(([k, v]) => (
             <div key={k} className="flex items-center justify-between gap-3">
               <span className="text-muted-foreground">{k}</span>
-              <span className="font-semibold">{v}</span>
+              <span className="truncate font-semibold">{v}</span>
             </div>
           ))}
         </div>
       </Card>
 
-      <div className="mt-auto space-y-2.5">
-        <Button variant="outline" onClick={onHome}>
-          View Incident
-        </Button>
+      <div className="mt-auto">
         <Button variant="success" onClick={onHome}>
           Return Home
         </Button>
