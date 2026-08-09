@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { PhoneShell } from "@/app/ResQNow";
+import { ResQProvider } from "@/hooks/useResQ";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -24,5 +25,9 @@ export const Route = createFileRoute("/")({
 });
 
 function Index() {
-  return <PhoneShell />;
+  return (
+    <ResQProvider>
+      <PhoneShell />
+    </ResQProvider>
+  );
 }
