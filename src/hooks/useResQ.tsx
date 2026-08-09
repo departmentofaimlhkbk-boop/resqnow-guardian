@@ -496,7 +496,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.rpc("advance_incident", {
         _incident_id: incident.id,
         _next_stage: stage,
-        _note: note ?? undefined,
+        ...(note ? { _note: note } : {}),
         _metadata: {},
       });
       if (error) throw new Error(message(error, "Could not update the emergency."));
@@ -595,7 +595,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.rpc("advance_incident", {
         _incident_id: helperIncident.id,
         _next_stage: stage,
-        _note: note ?? undefined,
+        ...(note ? { _note: note } : {}),
         _metadata: {},
       });
       if (error) throw new Error(message(error, "Could not update the rescue."));
