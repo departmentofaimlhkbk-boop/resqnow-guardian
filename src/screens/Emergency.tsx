@@ -197,11 +197,11 @@ export function AIAnalysis({
           <div className="flex items-center justify-between">
             <div>
               <Label tone="orange">Estimated Severity</Label>
-              <p className="mt-1 text-[28px] font-bold leading-none text-primary">HIGH</p>
+              <p className="mt-1 text-[28px] font-bold uppercase leading-none text-primary">{severity}</p>
             </div>
             <div className="text-right">
               <p className="text-[12px] text-muted-foreground">Confidence</p>
-              <p className="text-[18px] font-bold text-warning">94%</p>
+              <p className="text-[18px] font-bold text-warning">{Math.round(confidence * 100)}%</p>
             </div>
           </div>
         </Card>
