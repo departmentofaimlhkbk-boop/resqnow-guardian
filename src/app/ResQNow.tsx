@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ShieldPlus } from "lucide-react";
 import { Onboarding } from "@/screens/Onboarding";
@@ -20,6 +20,8 @@ import {
 } from "@/screens/Helper";
 import { MapScreen, HistoryScreen, CommunityScreen, ProfileScreen, SettingsScreen } from "@/screens/Tabs";
 import { BottomNavigation, type Tab } from "@/components/BottomNavigation";
+import { NotificationsScreen } from "@/screens/Tabs";
+import { useResQ } from "@/hooks/useResQ";
 
 type Stage =
   | "onboarding"
@@ -44,7 +46,8 @@ type Stage =
   | "handover"
   | "completed"
   | "settings"
-  | "history";
+  | "history"
+  | "notifications";
 
 const FULLSCREEN: Stage[] = [
   "onboarding",
@@ -70,9 +73,52 @@ const FULLSCREEN: Stage[] = [
 ];
 
 export function ResQNowApp() {
+  const {
+    authStatus,
+    profile,
+    incident,
+    helperIncident,
+    helperRequests,
+    contacts,
+    signOut,
+    startIncident,
+  } = useResQ();
   const [stage, setStage] = useState<Stage>("onboarding");
   const [tab, setTab] = useState<Tab>("home");
   const go = (s: Stage) => setStage(s);
+
+  // Keep the local screen flow in sync with backend auth + onboarding state.
+  useEffect(() => {
+    if (authStatus === "loading") return;
+    if (authStatus === "signed-out") {
+      setStage((s) => (s === "onboarding" ? s : "auth"));
+      return;
+    }
+    const step = profile?.onboarding_step ?? "contacts";
+    setStage((s) => {
+      if (s === "onboarding" || s === "auth") return step === "done" ? "app" : (step as Stage);
+      return s;
+    });
+  }, [authStatus, profile?.onboarding_step]);
+
+  // A live incident owned by this user drives the victim emergency screens.
+  useEffect(() => {
+    if (!incident) return;
+    const map: Partial<Record<string, Stage>> = {
+      alarm_1: "alarm1",
+      alarm_2: "alarm2",
+      alarm_3: "alarm3",
+      escalated: "no-response",
+      helper_search: "broadcast",
+    };
+    const next = map[incident.stage];
+    if (next && stage === "app") setStage(next);
+  }, [incident?.stage]);
+
+  // Incoming helper request takes over the screen.
+  useEffect(() => {
+    if (helperRequests.length > 0 && stage === "app" && !incident) setStage("helper-request");
+  }, [helperRequests.length]);
 
   const showNav = !FULLSCREEN.includes(stage);
 
@@ -81,7 +127,7 @@ export function ResQNowApp() {
       case "onboarding":
         return <Onboarding onDone={() => go("auth")} />;
       case "auth":
-        return <Auth onDone={() => go("contacts")} />;
+        return <Auth />;
       case "contacts":
         return <SelectContacts onDone={() => go("permissions")} />;
       case "permissions":
@@ -105,9 +151,24 @@ export function ResQNowApp() {
       case "no-response":
         return <NoResponse onNext={() => go("ai")} />;
       case "ai":
-        return <AIAnalysis onNext={() => go("broadcast")} />;
+        return (
+          <AIAnalysis
+            onNext={() => go("broadcast")}
+            severity={incident?.severity ?? "moderate"}
+            confidence={incident?.accident_probability ?? 0.9}
+          />
+        );
       case "broadcast":
-        return <Broadcast onTracking={() => go("helper-request")} />;
+        return (
+          <Broadcast
+            onTracking={() => {
+              setTab("home");
+              go("app");
+            }}
+            helpersNotified={incident?.helpers_notified ?? 0}
+            contactsNotified={contacts.filter((c) => c.is_selected).length}
+          />
+        );
       case "helper-request":
         return (
           <HelperRequest
@@ -137,6 +198,7 @@ export function ResQNowApp() {
       case "completed":
         return (
           <Completed
+            incident={helperIncident ?? incident}
             onHome={() => {
               setTab("home");
               go("app");
@@ -147,6 +209,8 @@ export function ResQNowApp() {
         return <SettingsScreen onBack={() => go("app")} />;
       case "history":
         return <HistoryScreen />;
+      case "notifications":
+        return <NotificationsScreen onBack={() => go("app")} />;
       default:
         switch (tab) {
           case "map":
@@ -158,15 +222,20 @@ export function ResQNowApp() {
               <ProfileScreen
                 onSettings={() => go("settings")}
                 onHistory={() => go("history")}
-                onLogout={() => go("auth")}
+                onContacts={() => go("contacts")}
+                onLogout={() => {
+                  void signOut();
+                  go("auth");
+                }}
               />
             );
           default:
             return (
               <VictimHome
-                onSos={() => go("alarm3")}
-                onSimulate={() => go("alarm1")}
-                onHelperMode={() => go("helper-request")}
+                onSos={() => void startIncident({ source: "manual_sos" })}
+                onSimulate={() => void startIncident({ source: "sensor" })}
+                onHelperMode={() => go("community")}
+                onNotifications={() => go("notifications")}
               />
             );
         }
