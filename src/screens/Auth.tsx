@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { ShieldPlus, Mail, Lock, User, Eye, EyeOff } from "lucide-react";
+import { ShieldPlus, Mail, Lock, User, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 import { Button, Screen } from "@/components/kit";
+import { useResQ } from "@/hooks/useResQ";
 
 function Field({
   icon: Icon,
@@ -18,10 +19,53 @@ function Field({
   );
 }
 
-export function Auth({ onDone }: { onDone: () => void }) {
+export function Auth() {
+  const { signIn, signUp, signInWithGoogle } = useResQ();
   const [mode, setMode] = useState<"login" | "register">("login");
   const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const isLogin = mode === "login";
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    if (!email.trim() || !password) {
+      setError("Enter your email and password.");
+      return;
+    }
+    if (!isLogin && !fullName.trim()) {
+      setError("Enter your full name.");
+      return;
+    }
+    if (!isLogin && password.length < 8) {
+      setError("Use at least 8 characters for your password.");
+      return;
+    }
+    setBusy(true);
+    try {
+      if (isLogin) await signIn(email, password);
+      else await signUp(fullName, email, password);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const google = async () => {
+    setError(null);
+    setBusy(true);
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Google sign-in failed.");
+      setBusy(false);
+    }
+  };
 
   return (
     <Screen className="flex flex-col px-6 pb-8 pt-16">
@@ -41,7 +85,11 @@ export function Auth({ onDone }: { onDone: () => void }) {
         {(["login", "register"] as const).map((m) => (
           <button
             key={m}
-            onClick={() => setMode(m)}
+            type="button"
+            onClick={() => {
+              setMode(m);
+              setError(null);
+            }}
             className={`h-10 rounded-xl text-[13px] font-semibold capitalize transition-all ${
               mode === m ? "bg-primary text-white shadow-glow-red" : "text-muted-foreground"
             }`}
@@ -51,17 +99,33 @@ export function Auth({ onDone }: { onDone: () => void }) {
         ))}
       </div>
 
-      <form
-        className="mt-6 space-y-3"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onDone();
-        }}
-      >
-        {!isLogin && <Field icon={User} placeholder="Full name" defaultValue="Arjun Menon" />}
-        <Field icon={Mail} placeholder="Phone / Email" defaultValue="arjun@resqnow.app" />
+      <form className="mt-6 space-y-3" onSubmit={submit}>
+        {!isLogin && (
+          <Field
+            icon={User}
+            placeholder="Full name"
+            autoComplete="name"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+          />
+        )}
+        <Field
+          icon={Mail}
+          type="email"
+          placeholder="Email address"
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
         <div className="relative">
-          <Field icon={Lock} type={show ? "text" : "password"} placeholder="Password" defaultValue="resqnow123" />
+          <Field
+            icon={Lock}
+            type={show ? "text" : "password"}
+            placeholder="Password"
+            autoComplete={isLogin ? "current-password" : "new-password"}
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
           <button
             type="button"
             onClick={() => setShow(!show)}
@@ -70,14 +134,16 @@ export function Auth({ onDone }: { onDone: () => void }) {
             {show ? <EyeOff className="size-4.5" /> : <Eye className="size-4.5" />}
           </button>
         </div>
-        {isLogin && (
-          <div className="flex justify-end">
-            <button type="button" className="text-[13px] font-medium text-blue-bright">
-              Forgot Password?
-            </button>
+
+        {error && (
+          <div className="flex items-start gap-2 rounded-2xl border border-primary/35 bg-primary/[0.08] p-3 text-[13px] text-primary">
+            <AlertCircle className="mt-0.5 size-4 shrink-0" />
+            <span>{error}</span>
           </div>
         )}
-        <Button type="submit" variant="emergency" className="mt-2">
+
+        <Button type="submit" variant="emergency" className="mt-2" disabled={busy}>
+          {busy ? <Loader2 className="size-4.5 animate-spin" /> : null}
           {isLogin ? "Login" : "Register"}
         </Button>
       </form>
@@ -86,7 +152,7 @@ export function Auth({ onDone }: { onDone: () => void }) {
         <span className="h-px flex-1 bg-border" /> OR CONTINUE WITH <span className="h-px flex-1 bg-border" />
       </div>
 
-      <Button variant="outline" onClick={onDone}>
+      <Button variant="outline" onClick={google} disabled={busy}>
         <svg viewBox="0 0 24 24" className="size-4.5">
           <path
             fill="#EA4335"
@@ -97,7 +163,7 @@ export function Auth({ onDone }: { onDone: () => void }) {
       </Button>
 
       <p className="mt-6 text-center text-[12px] text-muted-foreground">
-        Demo mode — authentication is simulated.
+        Your account, contacts and incidents are stored securely in your ResQNow backend.
       </p>
     </Screen>
   );
