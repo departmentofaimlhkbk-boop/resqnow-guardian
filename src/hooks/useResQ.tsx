@@ -65,6 +65,7 @@ export type ResQState = {
   medical: Medical | null;
   settings: Settings | null;
   helper: HelperRow | null;
+  nearbyHelpers: HelperRow[];
   hospitals: Hospital[];
   incident: Incident | null;
   incidentEvents: IncidentEvent[];
@@ -125,6 +126,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
   const [medical, setMedical] = useState<Medical | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [helper, setHelper] = useState<HelperRow | null>(null);
+  const [nearbyHelpers, setNearbyHelpers] = useState<HelperRow[]>([]);
   const [hospitals, setHospitals] = useState<Hospital[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
   const [incident, setIncident] = useState<Incident | null>(null);
@@ -181,13 +183,14 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       setLoadingData(true);
       setDataError(null);
       try {
-        const [p, c, m, s, h, hosp, inc, reqs, notes] = await Promise.all([
+        const [p, c, m, s, h, hosp, nearby, inc, reqs, notes] = await Promise.all([
           supabase.from("profiles").select("*").eq("id", uid).maybeSingle(),
           supabase.from("emergency_contacts").select("*").eq("user_id", uid).order("created_at"),
           supabase.from("medical_profiles").select("*").eq("user_id", uid).maybeSingle(),
           supabase.from("user_settings").select("*").eq("user_id", uid).maybeSingle(),
           supabase.from("helpers").select("*").eq("user_id", uid).maybeSingle(),
           supabase.from("hospitals").select("*").order("name"),
+          supabase.from("helpers").select("*").eq("is_available", true).limit(30),
           supabase.from("incidents").select("*").eq("user_id", uid).order("created_at", { ascending: false }),
           supabase
             .from("emergency_requests")
@@ -198,7 +201,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
           supabase.from("notifications").select("*").eq("user_id", uid).order("created_at", { ascending: false }).limit(50),
         ]);
 
-        const firstError = [p, c, m, s, h, hosp, inc, reqs, notes].find((r) => r.error)?.error;
+        const firstError = [p, c, m, s, h, hosp, nearby, inc, reqs, notes].find((r) => r.error)?.error;
         if (firstError) throw firstError;
         if (!mounted.current) return;
 
@@ -228,6 +231,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
         setMedical(m.data ?? null);
         setSettings(s.data ?? null);
         setHelper(h.data ?? null);
+        setNearbyHelpers(nearby.data ?? []);
         setHospitals(hosp.data ?? []);
         setIncidents(allIncidents);
         setIncident(active);
@@ -265,6 +269,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       setMedical(null);
       setSettings(null);
       setHelper(null);
+      setNearbyHelpers([]);
       setIncidents([]);
       setIncident(null);
       setIncidentEvents([]);
@@ -646,6 +651,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       medical,
       settings,
       helper,
+      nearbyHelpers,
       hospitals,
       incident,
       incidentEvents,
@@ -691,6 +697,7 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       medical,
       settings,
       helper,
+      nearbyHelpers,
       hospitals,
       incident,
       incidentEvents,
