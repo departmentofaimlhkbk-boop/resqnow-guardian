@@ -214,7 +214,15 @@ export function AIAnalysis({
 
 const BC_ITEMS = ["Emergency Contacts", "Nearby Helpers", "Nearest Hospital", "Police"];
 
-export function Broadcast({ onTracking }: { onTracking: () => void }) {
+export function Broadcast({
+  onTracking,
+  helpersNotified,
+  contactsNotified,
+}: {
+  onTracking: () => void;
+  helpersNotified: number;
+  contactsNotified: number;
+}) {
   const [done, setDone] = useState(0);
   useEffect(() => {
     if (done >= BC_ITEMS.length) return;
@@ -231,10 +239,14 @@ export function Broadcast({ onTracking }: { onTracking: () => void }) {
           {sent ? "ALERT DELIVERED" : "BROADCASTING"}
         </Pill>
         <h1 className="mt-4 text-[28px] font-bold tracking-tight">
-          {sent ? "Help is on the way" : "Sending Alert..."}
+          {sent ? (helpersNotified > 0 ? "Help is on the way" : "Waiting for a helper") : "Sending Alert..."}
         </h1>
         <p className="mt-1.5 text-[14px] text-muted-foreground">
-          {sent ? "Nearby helpers have been notified." : "Reaching everyone who can help you right now"}
+          {sent
+            ? `${contactsNotified} emergency contact${contactsNotified === 1 ? "" : "s"} and ${helpersNotified} nearby helper${
+                helpersNotified === 1 ? "" : "s"
+              } notified.`
+            : "Reaching everyone who can help you right now"}
         </p>
       </div>
 
