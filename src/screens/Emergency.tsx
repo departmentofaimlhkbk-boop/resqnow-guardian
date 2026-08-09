@@ -139,7 +139,15 @@ export function NoResponse({ onNext }: { onNext: () => void }) {
 
 const AI_ITEMS = ["Analyzing Impact", "Analyzing Speed", "Checking Motion", "Verifying Location", "Predicting Severity"];
 
-export function AIAnalysis({ onNext }: { onNext: () => void }) {
+export function AIAnalysis({
+  onNext,
+  severity,
+  confidence,
+}: {
+  onNext: () => void;
+  severity: string;
+  confidence: number;
+}) {
   const [done, setDone] = useState(0);
   useEffect(() => {
     if (done >= AI_ITEMS.length) {
