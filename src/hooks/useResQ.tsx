@@ -471,10 +471,10 @@ export function ResQProvider({ children }: { children: ReactNode }) {
       const result = await runInference(samples);
 
       const { data, error } = await supabase.rpc("start_incident", {
-        _latitude: lat ?? undefined,
-        _longitude: lng ?? undefined,
-        _address: profile?.location ?? undefined,
-        _speed: samples[0]?.speedKmh ?? undefined,
+        ...(lat !== null ? { _latitude: lat } : {}),
+        ...(lng !== null ? { _longitude: lng } : {}),
+        ...(profile?.location ? { _address: profile.location } : {}),
+        ...(samples[0] ? { _speed: samples[0].speedKmh } : {}),
         _severity: result.severity,
         _probability: result.accidentProbability,
         _source: source,
